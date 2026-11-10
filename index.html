@@ -53,7 +53,10 @@
   .actorhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
   .warn{background:var(--flag-soft);color:var(--ink);border-left:3px solid var(--flag);padding:8px 12px;font-size:.86rem;margin:10px 0;font-family:-apple-system,'Segoe UI',Roboto,sans-serif;}
   .warn ul{margin:4px 0 0 18px;padding:0;}
-  .bar{height:6px;background:var(--rule);border-radius:3px;overflow:hidden;margin:6px 0 0;}
+  .prog{margin:-6px 0 16px;}
+  .progtop{display:flex;justify-content:space-between;font-size:.9rem;}
+  .progsub{font-size:.78rem;color:var(--ink-soft);margin-top:5px;}
+  .bar{height:10px;background:var(--rule);border-radius:5px;overflow:hidden;margin:6px 0 0;}
   .bar i{display:block;height:100%;background:var(--good);}
   table.list{width:100%;border-collapse:collapse;font-size:.84rem;font-family:-apple-system,'Segoe UI',Roboto,sans-serif;}
   table.list td,table.list th{padding:6px 8px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top;}
@@ -307,7 +310,31 @@ function topbar(sub){
   const n = STATE.segments.length;
   return `<header class="top"><h1>Family Ontology Coder <span class="small">· ${esc(GUIDE_VERSION)}</span></h1>
     <div class="meta">${esc(sub||'')}${n?` · ${done} of ${n} done`:''}</div></header>
-    ${n?`<div class="bar" aria-hidden="true"><i style="width:${Math.round(100*done/n)}%"></i></div><div style="height:14px"></div>`:''}`;
+    ${n?progressHTML(done,n):''}`;
+}
+function progressHTML(done,n){
+  const pct = Math.round(100*done/n);
+  const byEntry = {};
+  STATE.segments.forEach(s=>{
+    const k = s.entry_id || s.segment_id;
+    const c = STATE.codings[s.segment_id];
+    (byEntry[k] = byEntry[k] || {t:0,d:0}).t++;
+    if(c && c.done) byEntry[k].d++;
+  });
+  const ents = Object.values(byEntry);
+  const entDone = ents.filter(e=>e.d===e.t).length;
+  const secs = STATE.segments.map(s=>STATE.codings[s.segment_id]).filter(c=>c&&c.done&&c.seconds>0).map(c=>c.seconds);
+  let timeTxt = 'Time estimate appears after 3 segments.';
+  if(secs.length>=3){
+    const avg = secs.reduce((a,b)=>a+b,0)/secs.length;
+    const left = Math.round(avg*(n-done)/60);
+    const h = Math.floor(left/60), m = left%60;
+    timeTxt = 'About '+Math.round(avg)+' seconds per segment. Estimated time left: '+(h?h+' h ':'')+m+' min.';
+  }
+  return `<div class="prog" role="progressbar" aria-valuemin="0" aria-valuemax="${n}" aria-valuenow="${done}">
+    <div class="progtop"><b>${done} of ${n} segments coded</b><span>${pct}%</span></div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <div class="progsub">Entries finished: <b>${entDone} of ${ents.length}</b> · ${timeTxt}</div></div>`;
 }
 function render(){
   const y = window.scrollY;
