@@ -53,6 +53,8 @@
   .actorhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
   .warn{background:var(--flag-soft);color:var(--ink);border-left:3px solid var(--flag);padding:8px 12px;font-size:.86rem;margin:10px 0;font-family:-apple-system,'Segoe UI',Roboto,sans-serif;}
   .warn ul{margin:4px 0 0 18px;padding:0;}
+  .drop{border:2px dashed var(--rule);border-radius:4px;padding:22px;text-align:center;background:var(--paper);}
+  .drop.over{border-color:var(--accent);background:var(--accent-soft);}
   .prog{margin:-6px 0 16px;}
   .progtop{display:flex;justify-content:space-between;font-size:.9rem;}
   .progsub{font-size:.78rem;color:var(--ink-soft);margin-top:5px;}
@@ -200,13 +202,13 @@ const FIELDS = [
   {sec:'E', secTitle:'E. Viability domains', secNote:'Thirteen independent Yes/No flags for every actor row. Several can be Yes. No primary domain. Yes only when the words in the segment show the domain.'},
   ...DOMAINS.map(d => ({id:'Dom_'+d[0], label:d[0], type:'yn', prov:1, def:d[1], when:'The words in the segment touch this domain.', domain:1})),
 
-  {sec:'F', secTitle:'F. Time and notes', secNote:'Coded for every actor row.'},
+  {sec:'F', secTitle:'F. Time and notes', secNote:'Coded for every actor row. Coding rule: code only what the segment’s own words state or clearly imply. Use nothing from outside the segment, such as other entries. If unsure, code No and say why in Coder_Notes.'},
   {id:'Time_Frame', type:'enum', values:['Current','Past','Unclear'], req:1,
    def:'When the actor-relevant event in the segment occurs relative to the diarist’s writing.',
    when:'Current for present or habitual events. Past for completed or remembered events. Unclear when mixed or hypothetical.'},
   {id:'Coder_Notes', type:'area',
-   def:"Short quoted phrases that support a Yes on any flag, plus the actor's role when coded Other_Role.",
-   when:'Quote the minimal phrase that triggered each Yes for Care_Content_Present, Rupture, Repair, Actor_as_Trigger, and Assumption_Present.'}
+   def:"A few key words copied from the segment that support a Yes, plus the actor's role when coded Other_Role. If unsure and you coded No, say why in a few words.",
+   when:'Key words only, no full sentences. Needed for the judgment flags (Care_Content_Present, Rupture, Repair, Actor_as_Trigger, Assumption_Present). Leave it empty when the answer is obvious.'}
 ];
 const ACTOR_FIELDS = FIELDS.filter(f => f.id);
 const NOTES_FIELDS = ACTOR_FIELDS.filter(f => f.notes).map(f => f.id);
@@ -391,7 +393,7 @@ function fieldHTML(f, a, ai){
     control = `<input type="text" data-a="${ai}" data-f="${f.id}" value="${esc(a[f.id])}">` +
       (f.id==='Actor_Mention' ? `<div style="margin-top:5px"><button class="small ghost" type="button" data-use="${ai}">Use selected text</button></div>`:'');
   } else if(f.type==='area'){
-    control = `<textarea data-a="${ai}" data-f="${f.id}" placeholder="Quote the shortest phrase behind each Yes">${esc(a[f.id])}</textarea>`;
+    control = `<textarea data-a="${ai}" data-f="${f.id}" placeholder="A few key words from the segment behind each judgment Yes (optional if obvious)">${esc(a[f.id])}</textarea>`;
   } else if(f.type==='role'){
     control = `<select data-a="${ai}" data-f="${f.id}"><option value="">Choose a role…</option>` +
       ROLES.map(r=>`<option ${a[f.id]===r?'selected':''}>${esc(r)}</option>`).join('') + `</select>` +
@@ -635,7 +637,7 @@ function validate(c){
       NOTES_FIELDS.forEach(id=>{
         if(a[id]==='Yes' && !String(a.Coder_Notes||'').trim()){
           if(!soft.some(w=>w.text.startsWith(tag+'Coder_Notes')))
-            soft.push({text:tag+'Coder_Notes is empty, but '+id+' (and maybe others) is Yes. Rule 11: quote the shortest supporting phrase.', soft:1});
+            soft.push({text:tag+'Coder_Notes is empty, but '+id+' (and maybe others) is Yes. A few key words from the segment help (optional if obvious).', soft:1});
         }
       });
       if(a.Care_Content_Present==='Yes' && !CARE_TYPES.some(t=>a[t.id]==='Yes'))
@@ -815,19 +817,45 @@ function viewCompare(){
   return viewCmpSettle();
 }
 function viewCmpLoad(){
-  const A=CMP.A, B=CMP.B;
+  const A=CMP.A, B=CMP.B; const nseg=Object.keys(CMP.textMap).length;
+  const st=(ok,txt)=>`<li>${ok?'<span class="done">✓</span>':'<span class="todo">○</span>'} ${txt}</li>`;
   return `${cmpHeader('Run this only after both coders have finished')}
   <div class="card">
-    <p style="margin-top:0">Load the two coders' CSV files, and the segment file so the text shows. Everything stays in this browser.</p>
-    <div class="lbl">1. First coder's CSV ${A?'<span class="done">· loaded: '+esc(A.coder)+' ('+A.by.size+' segments)</span>':''}</div>
-    <input type="file" id="cmpA" accept=".csv">
-    <div class="lbl" style="margin-top:14px">2. Second coder's CSV ${B?'<span class="done">· loaded: '+esc(B.coder)+' ('+B.by.size+' segments)</span>':''}</div>
-    <input type="file" id="cmpB" accept=".csv">
-    <div class="lbl" style="margin-top:14px">3. Segment file (for the text) ${Object.keys(CMP.textMap).length?'<span class="done">· loaded: '+Object.keys(CMP.textMap).length+' segments</span>':''}</div>
-    <input type="file" id="cmpSeg" accept=".json,.csv">
+    <p style="margin-top:0">Select or drop <b>all the files at once</b>: both coders' CSVs and the segment file. The tool works out which is which and compares automatically. Everything stays in this browser.</p>
+    <div class="drop" id="cmpDrop"><div style="margin-bottom:8px">Drop the files here, or choose them:</div><input type="file" id="cmpFiles" accept=".csv,.json" multiple></div>
+    <ul style="list-style:none;margin:12px 0 0;padding:0;font-size:.9rem">
+      ${st(!!A, A?'Coder file: <b>'+esc(A.coder)+'</b> ('+A.by.size+' segments)':'First coder\'s CSV')}
+      ${st(!!B, B?'Coder file: <b>'+esc(B.coder)+'</b> ('+B.by.size+' segments)':'Second coder\'s CSV')}
+      ${st(nseg>0, nseg?'Segment file ('+nseg+' segments)':'Segment file (optional, shows the text)')}
+    </ul>
     ${CMP.msg?`<div class="warn">${esc(CMP.msg)}</div>`:''}
-    <div class="btnrow"><button class="primary" id="cmpRun" ${A&&B?'':'disabled'}>Compare</button><button class="ghost" id="cmpBack">Back</button></div>
+    <div class="btnrow"><button class="primary" id="cmpRun" ${A&&B?'':'disabled'}>Compare</button><button class="ghost" id="cmpClear">Clear files</button><button class="ghost" id="cmpBack">Back</button></div>
   </div>`;
+}
+function setSegments(segs){ CMP.textMap={}; CMP.order=[]; segs.forEach(s=>{ CMP.textMap[s.segment_id]=s.text; CMP.order.push(s.segment_id); }); }
+async function ingestFiles(files){
+  CMP.msg=''; const found=[];
+  for(const f of files){
+    try{
+      if(/\.json$/i.test(f.name)){
+        const j=JSON.parse(await f.text()); const arr=Array.isArray(j)?j:(j&&j.segments);
+        if(arr){ const segs=normaliseSegments(arr); if(segs.length) setSegments(segs); else CMP.msg+='No segments found in '+f.name+'. '; }
+        else CMP.msg+='Skipped '+f.name+' (not a segment file). ';
+        continue;
+      }
+      const text=(await f.text()).replace(/^﻿/,''); const head=text.split(/\r?\n/,1)[0];
+      if(/(^|,)"?coder"?(,|$)/.test(head) && /row_n/.test(head)) found.push(await readCoderCSV(f));
+      else if(/segment_id/.test(head) && /(^|,)"?text"?(,|$)/.test(head)){ const segs=await readSegmentsFile(f); if(segs.length) setSegments(segs); }
+      else CMP.msg+='Could not tell what '+f.name+' is. ';
+    }catch(err){ CMP.msg+='Could not read '+f.name+': '+err.message+' '; }
+  }
+  const byCoder={};
+  [CMP.A,CMP.B,...found].filter(Boolean).forEach(c=>{ byCoder[c.coder]=c; });
+  const names=Object.keys(byCoder).sort();
+  if(names.length>2){ CMP.msg+='More than two coder files were loaded ('+names.join(', ')+'). Click Clear files and load just the two you want to compare. '; CMP.A=byCoder[names[0]]; CMP.B=null; }
+  else { CMP.A=names[0]?byCoder[names[0]]:null; CMP.B=names[1]?byCoder[names[1]]:null; }
+  if(CMP.A && CMP.B){ runCompare(); } else { CMP.res=null; CMP.view='load'; }
+  render();
 }
 function pctTxt(x){ return x==null?'n/a':Math.round(x*100)+'%'; }
 function kapTxt(k){ return k==null?'n/a':k.toFixed(2); }
@@ -855,7 +883,10 @@ function viewCmpStats(){
     <div class="lbl"><b>Agreement by field</b></div>
     <table class="list"><tr><th>Field</th><th>Pairs</th><th>Agree</th><th>Kappa</th><th>Yes (${esc(A)} / ${esc(B)} / both)</th></tr>${rows}</table>
     <p class="small">* Kappa is unreliable when a flag has fewer than 10 Yes answers per coder, or fewer than 10 pairs. A mostly-No flag can show high agreement and a low kappa at the same time. Read agreement and the Yes counts together.</p>
-    <div class="btnrow"><button class="primary" id="cmpSettle" ${r.items.length?'':'disabled'}>Settle disagreements</button><button id="cmpDlStats">Download agreement table (CSV)</button><button class="ghost" id="cmpReload">Load different files</button></div>
+    <div class="btnrow"><button class="primary" id="cmpSettle" ${r.items.length?'':'disabled'}>Settle disagreements</button><button id="cmpDlStats">Download agreement table (CSV)</button><button class="ghost" id="cmpReload">Clear and start over</button></div>
+    <div class="lbl" style="margin-top:14px">Add the segment file (to show the text), or replace a file</div>
+    <input type="file" id="cmpFiles" accept=".csv,.json" multiple>
+    <p class="small">${Object.keys(CMP.textMap).length?'Segment text loaded for '+Object.keys(CMP.textMap).length+' segments.':'No segment text loaded yet. Settling still works, but you will not see the text.'}</p>
   </div>`;
 }
 function rowSummary(row){
@@ -973,16 +1004,19 @@ function downloadStats(){
 /* ---------- events ---------- */
 function bindCompare(){
   const $=id=>document.getElementById(id); const on=(id,fn)=>{ const e=$(id); if(e) e.addEventListener('click',fn); };
-  const ca=$('cmpA'); if(ca) ca.addEventListener('change', async e=>{ try{ CMP.A=await readCoderCSV(e.target.files[0]); CMP.msg=''; }catch(err){ CMP.msg='Could not read file: '+err.message; } render(); });
-  const cb=$('cmpB'); if(cb) cb.addEventListener('change', async e=>{ try{ CMP.B=await readCoderCSV(e.target.files[0]); CMP.msg=''; }catch(err){ CMP.msg='Could not read file: '+err.message; } render(); });
-  const cs=$('cmpSeg'); if(cs) cs.addEventListener('change', async e=>{
-    try{ const segs=await readSegmentsFile(e.target.files[0]); CMP.textMap={}; CMP.order=[]; segs.forEach(s=>{ CMP.textMap[s.segment_id]=s.text; CMP.order.push(s.segment_id); }); CMP.msg=''; }catch(err){ CMP.msg='Could not read segment file: '+err.message; } render(); });
+  const cf=$('cmpFiles'); if(cf) cf.addEventListener('change', e=>ingestFiles([...e.target.files]));
+  const dz=$('cmpDrop'); if(dz){
+    ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{ e.preventDefault(); dz.classList.add('over'); }));
+    ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{ e.preventDefault(); dz.classList.remove('over'); }));
+    dz.addEventListener('drop', e=>ingestFiles([...e.dataTransfer.files]));
+  }
+  on('cmpClear', ()=>{ CMP.A=null; CMP.B=null; CMP.textMap={}; CMP.order=[]; CMP.res=null; CMP.msg=''; CMP.view='load'; render(); });
   on('cmpRun', ()=>{
     if(CMP.A.coder===CMP.B.coder){ CMP.msg='Both files have the same coder name ('+CMP.A.coder+'). Load one file from each coder.'; render(); return; }
     runCompare(); render();
   });
   on('cmpBack', ()=>{ STATE.screen='start'; render(); });
-  on('cmpReload', ()=>{ CMP.view='load'; CMP.res=null; render(); });
+  on('cmpReload', ()=>{ CMP.A=null; CMP.B=null; CMP.textMap={}; CMP.order=[]; CMP.res=null; CMP.msg=''; CMP.view='load'; render(); });
   on('cmpSettle', ()=>{ CMP.view='settle'; const i=CMP.res.items.findIndex(s=>!isSettled(s)); CMP.idx=i<0?0:i; render(); window.scrollTo(0,0); });
   on('cmpToStats', ()=>{ CMP.view='stats'; render(); });
   on('cmpDlStats', downloadStats);
